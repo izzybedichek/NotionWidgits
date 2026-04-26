@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Handmade Calendar</title>
+  <style>
+    /* ============================================================
+       THEMING — tweak these variables to restyle everything
+       ============================================================ */
+    :root {
+      --paper:        #faf8f3;   /* main background */
+      --ink:          #3a3530;   /* primary text */
+      --ink-light:    #8a7f75;   /* muted text */
+      --rule:         rgba(58,53,48,0.12); /* grid lines */
+      --accent:       #c97c5d;   /* highlight color (dots, today, focus) */
+      --note-bg:      #fffbea;   /* sticky note background */
+      --note-border:  #e8d98a;   /* sticky note border */
+      --cell-min-h:   100px;     /* min height per grid cell */
+      --font:         'Georgia', serif; /* swap to any Google Font or system font */
+    }
+
+    /* ============================================================
+       RESET & BASE
+       ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: var(--paper);
+      color: var(--ink);
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    /* ============================================================
+       TOOLBAR
+       ============================================================ */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    #month-title {
+      font-size: 22px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--ink);
+      width: 200px;
+      border-bottom: 1.5px solid var(--rule);
+      padding: 2px 4px;
+      outline: none;
+      font-family: var(--font);
+    }
+    #month-title:focus { border-bottom-color: var(--accent); }
+    .toolbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+    .btn {
+      font-size: 12px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(58,53,48,0.2);
+      background: white;
+      color: var(--ink-light);
+      cursor: pointer;
+      font-family: var(--font);
+      transition: background 0.12s, color 0.12s;
+    }
+    .btn:hover { background: #f0ede6; color: var(--ink); }
+    .btn.danger:hover { background: #fdecea; color: #b94040; border-color: #e8b4b4; }
+
+    /* ============================================================
+       CALENDAR WRAPPER (holds background scan image)
+       ============================================================ */
+    .cal-wrap {
+      position: relative;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--rule);
+      background: var(--paper);
+      display: flex;         /* this is the key line */
+      flex-direction: column;
+    }
+    #bg-img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: fill;   /* fill stretches to match exactly, no cropping */
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+      display: none;
+    }
+
+    /* ============================================================
+       DAY-OF-WEEK HEADERS
+       ============================================================ */
+    .day-headers {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      position: relative;
+      z-index: 2;
+      border-bottom: 1px solid var(--rule);
+      background: var(--paper);  /* add this too so the image doesn't bleed through */
+    }
+    .day-header {
+      padding: 7px 0;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--ink-light);
+      text-transform: uppercase;
+    }
+    .day-header.weekend { background: rgba(58,53,48,0.03); }
+
+    /* ============================================================
+       GRID
+       ============================================================ */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      grid-template-rows: repeat(6, 1fr);
+      position: relative;
+      z-index: 1;
+      flex: 1;             /* fills remaining height inside cal-wrap */
+    }
+
+    /* ============================================================
+       INDIVIDUAL CELLS
+       ============================================================ */
+    .cell {
+      border-right: 0.5px solid var(--rule);
+      border-bottom: 0.5px solid var(--rule);
+      padding: 6px 8px;
+      min-height: var(--cell-min-h);
+      position: relative;
+      cursor: pointer;
+      transition: background 0.12s;
+      user-select: none;
+    }
+    /* remove duplicate borders */
+    .cell:nth-child(6n)   { border-right: none; }
+    .cell:nth-last-child(-n+6) { border-bottom: none; }
+
+    .cell.weekend { background: rgba(58,53,48,0.025); }
+    .cell:hover   { background: rgba(201,124,93,0.06); }
+
+    /* days outside the current month — edit .out-of-month to style them */
+    .cell.out-of-month .day-num { opacity: 0.35; }
+
+    /* today highlight */
+    .cell.today { background: rgba(201,124,93,0.09); }
+    .cell.today .day-num { color: var(--accent); font-weight: 700; }
+
+    /* dot indicator for cells with notes */
+    .cell.has-note::after {
+      content: '';
+      position: absolute;
+      top: 7px; right: 8px;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.7;
+    }
+
+    /* ============================================================
+       DAY NUMBER (editable)
+       ============================================================ */
+    .day-num {
+      font-size: 13px;
+      color: var(--ink);
+      min-width: 22px;
+      min-height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      cursor: text;
+      padding: 2px 4px;
+      outline: none;
+    }
+    .day-num:focus { background: rgba(201,124,93,0.13); }
+
+    /* ============================================================
+       STICKER AREA
+       ============================================================ */
+    .sticker-area {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      margin-top: 5px;
+      min-height: 28px;
+    }
+    .sticker-img {
+      width: 28px; height: 28px;
+      object-fit: contain;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .sticker-img:hover { opacity: 0.65; }
+
+    /* the tiny + button that appears on hover */
+    .add-sticker-btn {
+      width: 22px; height: 22px;
+      border: 1px dashed var(--rule);
+      border-radius: 3px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      color: var(--ink-light);
+      font-size: 15px;
+      opacity: 0;
+      transition: opacity 0.15s;
+      background: transparent;
+      font-family: var(--font);
+    }
+    .cell:hover .add-sticker-btn { opacity: 0.55; }
+    .add-sticker-btn:hover { opacity: 1 !important; background: rgba(201,124,93,0.08); }
+
+    /* ============================================================
+       NOTE PANEL (floating sticky note)
+       ============================================================ */
+    .note-panel {
+      position: fixed;
+      z-index: 200;
+      background: var(--note-bg);
+      border: 1px solid var(--note-border);
+      border-radius: 7px;
+      box-shadow: 0 3px 16px rgba(0,0,0,0.12);
+      width: 250px;
+      padding: 11px 13px;
+      display: none;
+    }
+    .note-panel.open { display: block; }
+
+    .note-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .note-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-light);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .note-close {
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--ink-light);
+      background: none;
+      border: none;
+      font-family: var(--font);
+      padding: 0 2px;
+    }
+    .note-close:hover { color: var(--ink); }
+
+    #note-text {
+      width: 100%;
+      height: 90px;
+      font-size: 13px;
+      line-height: 1.55;
+      border: none;
+      background: transparent;
+      resize: none;
+      outline: none;
+      color: var(--ink);
+      font-family: var(--font);
+    }
+    #note-text::placeholder { color: var(--ink-light); }
+
+    .note-link-row { display: flex; gap: 6px; margin-top: 7px; }
+    #note-link {
+      flex: 1;
+      font-size: 12px;
+      padding: 4px 7px;
+      border: 1px solid var(--note-border);
+      border-radius: 5px;
+      background: rgba(255,255,255,0.6);
+      outline: none;
+      color: var(--ink);
+      font-family: var(--font);
+    }
+    #note-link:focus { border-color: var(--accent); }
+    .note-link-go {
+      font-size: 12px;
+      padding: 4px 9px;
+      border: 1px solid var(--note-border);
+      border-radius: 5px;
+      background: rgba(255,255,255,0.6);
+      cursor: pointer;
+      color: var(--ink);
+      font-family: var(--font);
+    }
+    .note-link-go:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+    .note-save-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+    #note-save {
+      font-size: 12px;
+      padding: 4px 14px;
+      border-radius: 12px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-family: var(--font);
+    }
+    #note-save:hover { opacity: 0.85; }
+
+    /* ============================================================
+       STICKER PICKER POPUP
+       ============================================================ */
+    .sticker-picker {
+      position: fixed;
+      z-index: 300;
+      background: white;
+      border: 1px solid rgba(58,53,48,0.15);
+      border-radius: 9px;
+      padding: 11px 12px;
+      display: none;
+      width: 210px;
+      box-shadow: 0 3px 14px rgba(0,0,0,0.1);
+    }
+    .sticker-picker.open { display: block; }
+    .sticker-picker-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .sticker-picker-header p { font-size: 11px; font-weight: 600; color: var(--ink-light); text-transform: uppercase; letter-spacing: 0.05em; }
+    .sp-close { background: none; border: none; cursor: pointer; color: var(--ink-light); font-size: 15px; font-family: var(--font); }
+    .sp-close:hover { color: var(--ink); }
+
+    .sticker-pick-upload {
+      font-size: 12px;
+      padding: 6px 10px;
+      width: 100%;
+      border-radius: 6px;
+      border: 1px dashed rgba(58,53,48,0.2);
+      background: transparent;
+      cursor: pointer;
+      color: var(--ink-light);
+      margin-bottom: 8px;
+      font-family: var(--font);
+      text-align: center;
+    }
+    .sticker-pick-upload:hover { background: #f5f2ec; color: var(--ink); }
+
+    .sticker-library { display: flex; flex-wrap: wrap; gap: 6px; }
+    .slib-img {
+      width: 34px; height: 34px;
+      object-fit: contain;
+      cursor: pointer;
+      border-radius: 5px;
+      border: 1.5px solid transparent;
+    }
+    .slib-img:hover { border-color: var(--accent); }
+    .sticker-empty { font-size: 11px; color: var(--ink-light); width: 100%; }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       TOOLBAR
+       ============================================================ -->
+  <div class="toolbar">
+    <input type="text" id="month-title" value="May 2025" spellcheck="false" title="Click to rename" />
+    <div class="toolbar-right">
+      <button class="btn" onclick="document.getElementById('bg-upload').click()">+ scan / photo</button>
+      <input type="file" id="bg-upload" accept="image/*" style="display:none" />
+      <button class="btn danger" id="clear-btn">clear month</button>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       CALENDAR
+       ============================================================ -->
+  <div class="cal-wrap" id="cal-wrap">
+    <div class="day-headers">
+      <!-- Edit these labels to change day names -->
+      <div class="day-header">Mon</div>
+      <div class="day-header">Tue</div>
+      <div class="day-header">Wed</div>
+      <div class="day-header">Thu</div>
+      <div class="day-header">Fri</div>
+      <div class="day-header weekend">Sat / Sun</div>
+    </div>
+    <div class="grid" id="grid">
+      <img id="bg-img" alt="scanned calendar background" />
+    </div>
+  </div>
+  <!-- ============================================================
+       NOTE PANEL (floating)
+       ============================================================ -->
+  <div class="note-panel" id="note-panel">
+    <div class="note-header">
+      <span class="note-label" id="note-label">Notes</span>
+      <button class="note-close" id="note-close">×</button>
+    </div>
+    <textarea id="note-text" placeholder="Add a note..."></textarea>
+    <div class="note-link-row">
+      <input id="note-link" type="url" placeholder="Paste a link..." />
+      <button class="note-link-go" id="note-link-go" title="Open link">↗</button>
+    </div>
+    <div class="note-save-row">
+      <button id="note-save">save</button>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       STICKER PICKER POPUP
+       ============================================================ -->
+  <div class="sticker-picker" id="sticker-picker">
+    <div class="sticker-picker-header">
+      <p>Add sticker</p>
+      <button class="sp-close" id="sp-close">×</button>
+    </div>
+    <button class="sticker-pick-upload" onclick="document.getElementById('sticker-upload').click()">
+      Upload image
+    </button>
+    <input type="file" id="sticker-upload" accept="image/*" style="display:none" />
+    <div class="sticker-library" id="sticker-library"></div>
+  </div>
+
+  <!-- ============================================================
+       JAVASCRIPT
+       ============================================================ -->
+  <script>
+    // ---- CONFIG ------------------------------------------------
+    const ROWS = 6;
+    const COLS = 6; // Mon Tue Wed Thu Fri Sat+Sun
+
+    // ---- STATE -------------------------------------------------
+    // notes[key]    = { text: string, link: string }
+    // stickers[key] = [ dataURL, dataURL, ... ]
+    // dayNums[key]  = string  (the number the user typed)
+    let notes        = {};
+    let stickers     = {};
+    let dayNums      = {};
+    let stickerLibrary = [];  // all uploaded sticker images (dataURLs)
+
+    let activeCell       = null; // key of cell whose note panel is open
+    let activeStickerCell = null; // key of cell we're adding a sticker to
+
+    // ---- PERSISTENCE -------------------------------------------
+    // Data is saved to localStorage so it survives page refreshes.
+    // Key is namespaced by the month title so each month gets its own data.
+    function storageKey(suffix) {
+      const title = document.getElementById('month-title').value.trim() || 'default';
+      return `cal_${title}_${suffix}`;
+    }
+
+    function loadState() {
+      try {
+        const sl = localStorage.getItem('cal_sticker_library');
+        if (sl) stickerLibrary = JSON.parse(sl);
+
+        const title = document.getElementById('month-title').value.trim() || 'default';
+        const n  = localStorage.getItem(storageKey('notes'));
+        const s  = localStorage.getItem(storageKey('stickers'));
+        const d  = localStorage.getItem(storageKey('daynums'));
+        const bg = localStorage.getItem(storageKey('bg'));
+        if (n) notes    = JSON.parse(n);
+        if (s) stickers = JSON.parse(s);
+        if (d) dayNums  = JSON.parse(d);
+        if (bg) {
+          const img = document.getElementById('bg-img');
+          img.src = bg;
+          img.style.display = 'block';
+        }
+      } catch(e) { console.warn('Could not load saved state', e); }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem('cal_sticker_library', JSON.stringify(stickerLibrary));
+        localStorage.setItem(storageKey('notes'),    JSON.stringify(notes));
+        localStorage.setItem(storageKey('stickers'), JSON.stringify(stickers));
+        localStorage.setItem(storageKey('daynums'),  JSON.stringify(dayNums));
+      } catch(e) { console.warn('Could not save state', e); }
+    }
+
+    // ---- BUILD GRID --------------------------------------------
+    function buildGrid() {
+      const grid = document.getElementById('grid');
+      const bgImg = document.getElementById('bg-img');
+      grid.innerHTML = '';
+      grid.appendChild(bgImg);
+
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const key  = `${r}_${c}`;
+          const cell = document.createElement('div');
+          cell.className = 'cell' + (c === 5 ? ' weekend' : '');
+          cell.dataset.key = key;
+
+          // -- Day number (user types it in) --
+          const numEl = document.createElement('div');
+          numEl.className = 'day-num';
+          numEl.contentEditable = 'true';
+          numEl.setAttribute('tabindex', '0');
+          numEl.title = 'Click to enter day number';
+          numEl.textContent = dayNums[key] || '';
+
+          numEl.addEventListener('click',   e  => e.stopPropagation());
+          numEl.addEventListener('keydown', e  => { if (e.key === 'Enter') { e.preventDefault(); numEl.blur(); } });
+          numEl.addEventListener('blur',    () => {
+            dayNums[key] = numEl.textContent.trim();
+            saveState();
+          });
+
+          cell.appendChild(numEl);
+
+          // -- Sticker area --
+          const stickerArea = document.createElement('div');
+          stickerArea.className = 'sticker-area';
+          stickerArea.id = 'stickers_' + key;
+          renderStickers(stickerArea, key);
+          cell.appendChild(stickerArea);
+
+          // -- Add-sticker button --
+          const addBtn = document.createElement('button');
+          addBtn.className = 'add-sticker-btn';
+          addBtn.textContent = '+';
+          addBtn.title = 'Add sticker';
+          addBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            openStickerPicker(key, addBtn);
+          });
+          cell.appendChild(addBtn);
+
+          // -- Note dot --
+          if (notes[key] && (notes[key].text || notes[key].link)) {
+            cell.classList.add('has-note');
+          }
+
+          // -- Click to open note --
+          cell.addEventListener('click', e => {
+            if (
+              e.target.classList.contains('day-num') ||
+              e.target.classList.contains('add-sticker-btn') ||
+              e.target.classList.contains('sticker-img')
+            ) return;
+            openNote(key, cell);
+          });
+
+          grid.appendChild(cell);
+        }
+      }
+    }
+
+    // ---- STICKER RENDERING -------------------------------------
+    function renderStickers(area, key) {
+      area.innerHTML = '';
+      (stickers[key] || []).forEach((src, idx) => {
+        const img = document.createElement('img');
+        img.className = 'sticker-img';
+        img.src = src;
+        img.title = 'Click to remove';
+        img.addEventListener('click', e => {
+          e.stopPropagation();
+          stickers[key].splice(idx, 1);
+          saveState();
+          renderStickers(area, key);
+        });
+        area.appendChild(img);
+      });
+    }
+
+    // ---- NOTE PANEL --------------------------------------------
+    function openNote(key, cellEl) {
+      activeCell = key;
+      const data = notes[key] || {};
+      document.getElementById('note-text').value = data.text || '';
+      document.getElementById('note-link').value = data.link || '';
+
+      // Label the panel with the day number if available
+      const num = dayNums[key];
+      document.getElementById('note-label').textContent = num ? `Day ${num}` : 'Notes';
+
+      // Position the panel beside the cell
+      const rect = cellEl.getBoundingClientRect();
+      const panel = document.getElementById('note-panel');
+      let left = rect.right + 10;
+      let top  = rect.top;
+      if (left + 265 > window.innerWidth)  left = rect.left - 265;
+      if (top  + 220 > window.innerHeight) top  = window.innerHeight - 225;
+      panel.style.left = Math.max(6, left) + 'px';
+      panel.style.top  = Math.max(6, top)  + 'px';
+      panel.classList.add('open');
+      document.getElementById('note-text').focus();
+    }
+
+    function saveNote() {
+      if (!activeCell) return;
+      const text = document.getElementById('note-text').value.trim();
+      const link = document.getElementById('note-link').value.trim();
+      notes[activeCell] = { text, link };
+      saveState();
+
+      // Update dot indicator on cell
+      const cell = document.querySelector(`.cell[data-key="${activeCell}"]`);
+      if (cell) {
+        cell.classList.toggle('has-note', !!(text || link));
+      }
+      document.getElementById('note-panel').classList.remove('open');
+      activeCell = null;
+    }
+
+    document.getElementById('note-save').addEventListener('click', saveNote);
+    document.getElementById('note-close').addEventListener('click', () => {
+      document.getElementById('note-panel').classList.remove('open');
+      activeCell = null;
+    });
+    document.getElementById('note-link-go').addEventListener('click', () => {
+      const link = document.getElementById('note-link').value.trim();
+      if (link) window.open(link, '_blank');
+    });
+
+    // ---- STICKER PICKER ----------------------------------------
+    function openStickerPicker(key, anchor) {
+      activeStickerCell = key;
+      renderStickerLibrary();
+      const picker = document.getElementById('sticker-picker');
+      const rect   = anchor.getBoundingClientRect();
+      let left = rect.right + 8;
+      let top  = rect.top;
+      if (left + 220 > window.innerWidth)  left = rect.left - 220;
+      if (top  + 220 > window.innerHeight) top  = window.innerHeight - 225;
+      picker.style.left = Math.max(4, left) + 'px';
+      picker.style.top  = Math.max(4, top)  + 'px';
+      picker.classList.add('open');
+    }
+
+    function renderStickerLibrary() {
+      const lib = document.getElementById('sticker-library');
+      lib.innerHTML = '';
+      if (stickerLibrary.length === 0) {
+        lib.innerHTML = '<span class="sticker-empty">Upload an image above to add stickers.</span>';
+        return;
+      }
+      stickerLibrary.forEach(src => {
+        const img = document.createElement('img');
+        img.className = 'slib-img';
+        img.src = src;
+        img.addEventListener('click', () => applyStickerToCell(src));
+        lib.appendChild(img);
+      });
+    }
+
+    function applyStickerToCell(src) {
+      if (!activeStickerCell) return;
+      if (!stickers[activeStickerCell]) stickers[activeStickerCell] = [];
+      stickers[activeStickerCell].push(src);
+      saveState();
+      const area = document.getElementById('stickers_' + activeStickerCell);
+      if (area) renderStickers(area, activeStickerCell);
+      document.getElementById('sticker-picker').classList.remove('open');
+    }
+
+    document.getElementById('sp-close').addEventListener('click', () => {
+      document.getElementById('sticker-picker').classList.remove('open');
+    });
+
+    // ---- FILE UPLOADS ------------------------------------------
+    document.getElementById('sticker-upload').addEventListener('change', function () {
+      const file = this.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        stickerLibrary.push(e.target.result);
+        saveState();
+        if (activeStickerCell) {
+          applyStickerToCell(e.target.result);
+        } else {
+          renderStickerLibrary();
+        }
+      };
+      reader.readAsDataURL(file);
+      this.value = '';
+    });
+
+    document.getElementById('bg-upload').addEventListener('change', function () {
+      const file = this.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = document.getElementById('bg-img');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        // Save the background for this month
+        try { localStorage.setItem(storageKey('bg'), e.target.result); } catch(err) {}
+      };
+      reader.readAsDataURL(file);
+      this.value = '';
+    });
+
+    // ---- CLEAR MONTH -------------------------------------------
+    document.getElementById('clear-btn').addEventListener('click', () => {
+      if (!confirm('Clear all notes, stickers and day numbers for this month?')) return;
+      notes = {}; stickers = {}; dayNums = {};
+      try { localStorage.removeItem(storageKey('bg')); } catch(e) {}
+      saveState();
+      buildGrid();
+      const img = document.getElementById('bg-img');
+      img.style.display = 'none';
+      img.src = '';
+    });
+
+    // ---- CLOSE PANELS ON OUTSIDE CLICK / ESCAPE ----------------
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        document.getElementById('note-panel').classList.remove('open');
+        document.getElementById('sticker-picker').classList.remove('open');
+        activeCell = activeStickerCell = null;
+      }
+    });
+    document.addEventListener('click', e => {
+      const panel  = document.getElementById('note-panel');
+      const picker = document.getElementById('sticker-picker');
+      if (!panel.contains(e.target))  panel.classList.remove('open');
+      if (!picker.contains(e.target) && !e.target.classList.contains('add-sticker-btn')) {
+        picker.classList.remove('open');
+      }
+    });
+
+    // ---- MONTH TITLE CHANGE reloads the right data -------------
+    document.getElementById('month-title').addEventListener('change', () => {
+      notes = {}; stickers = {}; dayNums = {};
+      loadState();
+      buildGrid();
+    });
+
+    // ---- INIT --------------------------------------------------
+    loadState();
+    buildGrid();
+  </script>
+</body>
+</html>
